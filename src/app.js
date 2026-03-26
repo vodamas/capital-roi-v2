@@ -912,70 +912,313 @@
       exportBtn.classList.add('exporting');
       exportBtn.textContent = 'Generating…';
 
-      var currentInputs = readInputs(refs);
-      var bankName = currentInputs.bankName || 'Capital ROI';
-      var fileName = bankName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_') + '_ROI_Report.pdf';
+      try { generatePdfReport(); } catch(e) { console.error('PDF export error:', e); }
 
-      // Clone the page into an offscreen container
-      var page = document.querySelector('.page');
-      var clone = page.cloneNode(true);
-
-      // Add PDF header
-      var header = document.createElement('div');
-      header.className = 'pdf-header';
-      header.innerHTML =
-        '<div class="pdf-header-title">Capital ROI Estimator — ' + bankName + '</div>' +
-        '<div class="pdf-header-sub">SAS Viya + Risk Solutions · Capital Analytics Platform</div>' +
-        '<div class="pdf-header-meta">' +
-          '<span>OSFI · Basel IV</span>' +
-          '<span>Confidential</span>' +
-          '<span>Generated: ' + new Date().toLocaleDateString('en-CA') + '</span>' +
-        '</div>';
-      clone.insertBefore(header, clone.firstChild);
-
-      // Apply PDF mode
-      clone.classList.add('pdf-mode');
-
-      // Force benchmark panel open in clone
-      var cloneBenchBody = clone.querySelector('.collapsible-body');
-      if (cloneBenchBody) cloneBenchBody.style.maxHeight = 'none';
-      var cloneBenchChevron = clone.querySelector('#benchChevron');
-      if (cloneBenchChevron) cloneBenchChevron.style.transform = 'rotate(180deg)';
-
-      // Mount offscreen
-      var wrapper = document.createElement('div');
-      wrapper.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;z-index:-1;';
-      wrapper.appendChild(clone);
-      document.body.appendChild(wrapper);
-
-      // Re-render charts inside the clone
-      var cloneCanvases = clone.querySelectorAll('canvas');
-      cloneCanvases.forEach(function (canvas) {
-        var original = document.getElementById(canvas.id);
-        if (!original) return;
-        // Copy the rendered chart as an image
-        var img = document.createElement('img');
-        img.src = original.toDataURL('image/png');
-        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
-        canvas.parentNode.replaceChild(img, canvas);
-      });
-
-      var opt = {
-        margin:      [10, 10, 10, 10],
-        filename:    fileName,
-        image:       { type: 'jpeg', quality: 0.92 },
-        html2canvas: { scale: 2, useCORS: true, scrollY: 0, width: 760, windowWidth: 760 },
-        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak:   { mode: ['css', 'legacy'], avoid: ['.card', '.chart-card', '.inaction-panel', '.exec-strip', '.kpi-card', '.section-divider', '.pdf-header'] },
-      };
-
-      html2pdf().set(opt).from(clone).save().then(function () {
-        document.body.removeChild(wrapper);
-        exportBtn.classList.remove('exporting');
-        exportBtn.innerHTML =
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>' +
-          ' Export PDF';
-      });
+      exportBtn.classList.remove('exporting');
+      exportBtn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>' +
+        ' Export PDF';
     });
+  }
+
+  function generatePdfReport() {
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    var pw = 210, ph = 297; // A4 mm
+    var ml = 15, mr = 15, mt = 15;
+    var cw = pw - ml - mr; // content width
+    var y = mt;
+
+    var inputs    = readInputs(refs);
+    var results   = compute(inputs);
+    var scenarios = buildScenarioSet(inputs);
+    var bankName  = inputs.bankName || 'Capital ROI';
+    var fileName  = bankName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_') + '_ROI_Report.pdf';
+
+    // Colors
+    var DARK   = [19, 33, 68];    // #132144
+    var BLUE   = [31, 96, 174];   // #1F60AE
+    var GREEN  = [0, 122, 53];    // #007A35
+    var RED    = [236, 17, 26];   // #EC111A
+    var ORANGE = [224, 108, 0];
+    var GRAY   = [100, 116, 139];
+    var LGRAY  = [240, 243, 250];
+    var WHITE  = [255, 255, 255];
+
+    function setColor(c) { doc.setTextColor(c[0], c[1], c[2]); }
+    function setFill(c) { doc.setFillColor(c[0], c[1], c[2]); }
+    function checkPage(need) { if (y + need > ph - 15) { doc.addPage(); y = mt; return true; } return false; }
+
+    // ── HEADER BANNER ──
+    setFill(DARK);
+    doc.roundedRect(ml, y, cw, 28, 3, 3, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); setColor(WHITE);
+    doc.text('Capital ROI Estimator', ml + 8, y + 11);
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+    doc.setTextColor(168, 196, 234);
+    doc.text(bankName + '  ·  SAS Viya + Risk Solutions', ml + 8, y + 18);
+    doc.setFontSize(8); doc.setTextColor(122, 155, 200);
+    doc.text('OSFI · Basel IV  |  Confidential  |  Generated: ' + new Date().toLocaleDateString('en-CA'), ml + 8, y + 24);
+    y += 34;
+
+    // ── EXECUTIVE SUMMARY KPIs ──
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Executive Summary', ml, y); y += 6;
+
+    var kpiBoxW = (cw - 8) / 3;
+    var kpis = [
+      { label: 'Total Annual Value', value: fmtM(results.totalValue), color: GREEN },
+      { label: 'New Lending Capacity', value: fmtB(results.lendingCapacity), color: BLUE },
+      { label: 'Return on Investment', value: fmtPct(results.roiPercent), color: GREEN },
+    ];
+    kpis.forEach(function(kpi, i) {
+      var bx = ml + i * (kpiBoxW + 4);
+      setFill(LGRAY);
+      doc.roundedRect(bx, y, kpiBoxW, 18, 2, 2, 'F');
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); setColor(GRAY);
+      doc.text(kpi.label.toUpperCase(), bx + 4, y + 6);
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold'); setColor(kpi.color);
+      doc.text(kpi.value, bx + 4, y + 14);
+    });
+    y += 24;
+
+    // ── BANK PROFILE TABLE ──
+    checkPage(40);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Bank Profile', ml, y); y += 2;
+
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Parameter', 'Value']],
+      body: [
+        ['Bank Name', inputs.bankName],
+        ['Risk-Weighted Assets', 'C$' + fmt(inputs.rwa, 1) + 'B'],
+        ['CET1 Ratio', fmt(inputs.cet1, 1) + '%'],
+        ['Current Platform Costs', 'C$' + fmt(inputs.platformCost, 1) + 'M/yr'],
+        ['Modernization Cost', 'C$' + fmt(inputs.modernizationCost, 1) + 'M'],
+        ['Cost of Capital', fmt(inputs.coc, 1) + '%'],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5, font: 'helvetica' },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ── TRANSFORMATION ASSUMPTIONS ──
+    checkPage(50);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Transformation Assumptions', ml, y); y += 2;
+
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Lever', 'Value', 'Stream']],
+      body: [
+        ['CRM & Collateral Capture', fmt(inputs.crmCapture, 1) + '%', 'Capital Efficiency'],
+        ['Pooling & Granularity', fmt(inputs.poolingGranularity, 1) + '%', 'Capital Efficiency'],
+        ['Model Risk Buffer Reduction', fmt(inputs.modelRiskBuffer, 1) + '%', 'Capital Efficiency'],
+        ['Total Capital Improvement', fmt(inputs.capImprovement, 1) + '%', 'Capital Efficiency'],
+        ['Tool Consolidation', 'C$' + fmt(inputs.toolConsolidation, 1) + 'M', 'Operational Savings'],
+        ['Infrastructure Savings', 'C$' + fmt(inputs.infraSavings, 1) + 'M', 'Operational Savings'],
+        ['Reporting Automation', 'C$' + fmt(inputs.reportingAutomation, 1) + 'M', 'Operational Savings'],
+        ['Model Deployment', 'C$' + fmt(inputs.modelDeployment, 1) + 'M', 'Operational Savings'],
+        ['Validation Reduction', fmt(inputs.validationReduction, 1) + '%', 'Operational Savings'],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.column.index === 2) {
+          data.cell.styles.textColor = data.cell.raw === 'Capital Efficiency' ? BLUE : GREEN;
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 8;
+        }
+        // Bold the total row
+        if (data.section === 'body' && data.row.index === 3) {
+          data.cell.styles.fillColor = [235, 240, 250];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ── ECONOMIC IMPACT ──
+    checkPage(60);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Economic Impact', ml, y); y += 2;
+
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Metric', 'Value', 'Description']],
+      body: [
+        ['RWA Reduction', fmtB(results.rwaReduction), 'Risk-weighted assets freed by improved IRB model granularity'],
+        ['Capital Released', fmtB(results.capitalReleased), 'CET1 capital no longer required to back reduced RWA'],
+        ['New Lending Capacity', fmtB(results.lendingCapacity), '10x leverage on released capital'],
+        ['Capital Value', fmtM(results.capitalValue), 'Annual return on released capital at hurdle rate'],
+        ['Operational Savings', fmtM(results.operationalSavings), 'Combined tool, infra, reporting, model & validation savings'],
+        ['Total Annual Value', fmtM(results.totalValue), 'Capital value + operational savings'],
+        ['ROI', fmtPct(results.roiPercent), 'Total Annual Value / Modernization Cost x 100'],
+        ['Payback Period', isFinite(results.paybackMonths) ? results.paybackMonths.toFixed(1) + ' months' : 'N/A', 'Months until value repays the investment'],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5 },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 }, 1: { cellWidth: 30, halign: 'right' }, 2: { fontSize: 8, textColor: GRAY } },
+      didParseCell: function(data) {
+        if (data.section === 'body' && (data.row.index === 5 || data.row.index === 6)) {
+          data.cell.styles.fillColor = [240, 250, 245];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    // ── COST OF INACTION ──
+    checkPage(20);
+    setFill([255, 243, 224]);
+    doc.roundedRect(ml, y, cw, 16, 2, 2, 'F');
+    doc.setDrawColor(224, 108, 0); doc.setLineWidth(0.8);
+    doc.line(ml, y, ml, y + 16);
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); setColor(ORANGE);
+    doc.text('Cost of Inaction — 12-Month Delay', ml + 5, y + 5.5);
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(GRAY);
+    var monthly = results.totalValue / 12;
+    doc.text('Each month of delay defers ~' + fmtM(monthly) + ' in value. Over 12 months: ' + fmtM(results.totalValue) + ' foregone.', ml + 5, y + 11);
+    doc.setDrawColor(0);
+    y += 22;
+
+    // ── CHARTS ──
+    var chartIds = ['chart1', 'chart2', 'chart3', 'chart4', 'chart5'];
+    var chartTitles = [
+      'Net Cumulative Benefit — 5-Year Payback View',
+      'Annual Value Build-Up (Waterfall)',
+      'Annual Cost Savings Generated (Year 1–5)',
+      activeLens === 'cfo' ? 'P&L Impact Summary' : 'ROI Gauge',
+      activeLens === 'cfo' ? 'Budget Reallocation Potential' : 'Impact Driver Ranking — ROI Sensitivity',
+    ];
+
+    chartIds.forEach(function(id, idx) {
+      var canvas = refs.elements[id];
+      if (!canvas) return;
+      var imgData;
+      try { imgData = canvas.toDataURL('image/png'); } catch(e) { return; }
+
+      var chartH = (id === 'chart4') ? 45 : 55;
+      checkPage(chartH + 12);
+
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); setColor(DARK);
+      doc.text(chartTitles[idx], ml, y + 4);
+      y += 6;
+
+      setFill(WHITE);
+      doc.roundedRect(ml, y, cw, chartH, 2, 2, 'FD');
+
+      var imgW = cw - 6;
+      var imgH = chartH - 4;
+      doc.addImage(imgData, 'PNG', ml + 3, y + 2, imgW, imgH);
+      y += chartH + 6;
+    });
+
+    // ── SCENARIO COMPARISON ──
+    checkPage(50);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Scenario Comparison', ml, y); y += 2;
+
+    function pb(v) { return isFinite(v) ? v.toFixed(1) : 'N/A'; }
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Metric', 'Conservative (−30%)', 'Base Case', 'Optimistic (+30%)']],
+      body: [
+        ['Cap Efficiency %', fmtPct(scenarios.conservative.inputs.capImprovement), fmtPct(scenarios.base.inputs.capImprovement), fmtPct(scenarios.optimistic.inputs.capImprovement)],
+        ['Op Savings ($M)', fmtM(scenarios.conservative.results.operationalSavings), fmtM(scenarios.base.results.operationalSavings), fmtM(scenarios.optimistic.results.operationalSavings)],
+        ['Capital Value ($M)', fmtM(scenarios.conservative.results.capitalValue), fmtM(scenarios.base.results.capitalValue), fmtM(scenarios.optimistic.results.capitalValue)],
+        ['Total Value ($M)', fmtM(scenarios.conservative.results.totalValue), fmtM(scenarios.base.results.totalValue), fmtM(scenarios.optimistic.results.totalValue)],
+        ['ROI (%)', fmtPct(scenarios.conservative.results.roiPercent), fmtPct(scenarios.base.results.roiPercent), fmtPct(scenarios.optimistic.results.roiPercent)],
+        ['Payback (months)', pb(scenarios.conservative.results.paybackMonths), pb(scenarios.base.results.paybackMonths), pb(scenarios.optimistic.results.paybackMonths)],
+        ['5-yr TCO Savings', fmtM(computeFiveYearTco(scenarios.conservative.inputs, scenarios.conservative.results)), fmtM(computeFiveYearTco(scenarios.base.inputs, scenarios.base.results)), fmtM(computeFiveYearTco(scenarios.optimistic.inputs, scenarios.optimistic.results))],
+      ],
+      styles: { fontSize: 9, cellPadding: 2.5, halign: 'center' },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 8 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { halign: 'left', fontStyle: 'bold', cellWidth: 40 }, 2: { fillColor: [235, 240, 250] } },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ── CALCULATION AUDIT TRAIL ──
+    checkPage(50);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Calculation Details — Audit Trail', ml, y); y += 2;
+
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Formula', 'Expression', 'Meaning', 'Result']],
+      body: [
+        ['Cap Improvement', 'CRM(' + fmt(inputs.crmCapture,1) + '%) + Pool(' + fmt(inputs.poolingGranularity,1) + '%) + MRB(' + fmt(inputs.modelRiskBuffer,1) + '%)', 'Sum of capital levers', fmt(inputs.capImprovement,1) + '%'],
+        ['RWA Reduction', fmt(inputs.rwa,1) + 'B × ' + fmt(inputs.capImprovement,1) + '% ÷ 100', 'Risk-weighted assets freed', fmtB(results.rwaReduction)],
+        ['Capital Released', fmt(results.rwaReduction,2) + 'B × ' + fmt(inputs.cet1,1) + '% ÷ 100', 'CET1 freed from RWA reduction', fmtB(results.capitalReleased)],
+        ['Lending Capacity', fmt(results.capitalReleased,2) + 'B × 10', '10x leverage proxy', fmtB(results.lendingCapacity)],
+        ['Capital Value', fmt(results.capitalReleased,2) + 'B × ' + fmt(inputs.coc,1) + '% × 1000', 'Annual return at hurdle rate', fmtM(results.capitalValue)],
+        ['Op Savings', fmt(inputs.toolConsolidation,1) + '+' + fmt(inputs.infraSavings,1) + '+' + fmt(inputs.reportingAutomation,1) + '+' + fmt(inputs.modelDeployment,1) + '+val', 'Combined operating benefit', fmtM(results.operationalSavings)],
+        ['Total Value', 'capitalValue + opSavings', 'Combined annual value', fmtM(results.totalValue)],
+        ['ROI', inputs.modernizationCost > 0 ? 'total ÷ ' + fmt(inputs.modernizationCost,1) + 'M × 100' : 'N/A', 'Annualized ROI', fmtPct(results.roiPercent)],
+        ['Payback', isFinite(results.paybackMonths) ? fmt(inputs.modernizationCost,1) + 'M ÷ (total÷12)' : 'N/A', 'Months to repay investment', isFinite(results.paybackMonths) ? results.paybackMonths.toFixed(1) + ' mo' : 'N/A'],
+      ],
+      styles: { fontSize: 7.5, cellPadding: 2 },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 7 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 28 }, 1: { cellWidth: 52, fontSize: 7 }, 2: { fontSize: 7, textColor: GRAY }, 3: { halign: 'right', fontStyle: 'bold', cellWidth: 24 } },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ── PEER BENCHMARKS ──
+    checkPage(40);
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(DARK);
+    doc.text('Peer Benchmarks — Canadian Big 5', ml, y); y += 2;
+
+    var spendPerRwa = inputs.rwa > 0 ? inputs.platformCost / inputs.rwa : 0;
+    doc.autoTable({
+      startY: y,
+      margin: { left: ml, right: mr },
+      head: [['Bank', 'RWA ($B)', 'Platform Spend', 'Opportunity', 'Spend/RWA', 'Opp. ROI']],
+      body: [
+        ['BNS (Scotiabank)', fmt(inputs.rwa, 1), 'C$' + fmt(inputs.platformCost, 0) + 'M/yr', 'C$70–90M', '$' + spendPerRwa.toFixed(3) + 'M/$B', '~' + Math.round(results.roiPercent) + '%'],
+        ['TD Bank', '~520', '~$30M/yr', '~$80–105M', '$0.058M/$B', '~463%'],
+        ['RBC', '~610', '~$38M/yr', '~$95–125M', '$0.062M/$B', '~550%'],
+        ['BMO', '~380', '~$22M/yr', '~$58–75M', '$0.058M/$B', '~333%'],
+        ['CIBC', '~310', '~$18M/yr', '~$46–62M', '$0.058M/$B', '~270%'],
+      ],
+      styles: { fontSize: 8, cellPadding: 2, halign: 'center' },
+      headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: 'bold', fontSize: 7 },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { halign: 'left', fontStyle: 'bold' } },
+      didParseCell: function(data) {
+        if (data.section === 'body' && data.row.index === 0) {
+          data.cell.styles.fillColor = [235, 240, 250];
+        }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+
+    // ── FOOTER ON EVERY PAGE ──
+    var totalPages = doc.internal.getNumberOfPages();
+    for (var p = 1; p <= totalPages; p++) {
+      doc.setPage(p);
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 150, 150);
+      doc.text('Capital ROI Estimator  ·  ' + bankName + '  ·  Confidential  ·  Page ' + p + '/' + totalPages, pw / 2, ph - 8, { align: 'center' });
+      // Red line at top of each page (after first)
+      if (p > 1) {
+        doc.setDrawColor(236, 17, 26); doc.setLineWidth(0.5);
+        doc.line(ml, 8, pw - mr, 8);
+        doc.setDrawColor(0);
+      }
+    }
+
+    doc.save(fileName);
   }
 })();
