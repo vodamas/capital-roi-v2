@@ -912,40 +912,65 @@
       exportBtn.classList.add('exporting');
       exportBtn.textContent = 'Generating…';
 
-      // Expand benchmarks panel so it's captured
-      var benchWasOpen = refs.elements.benchTrigger.getAttribute('aria-expanded') === 'true';
-      if (!benchWasOpen) toggleBenchmarks();
+      var currentInputs = readInputs(refs);
+      var bankName = currentInputs.bankName || 'Capital ROI';
+      var fileName = bankName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_') + '_ROI_Report.pdf';
 
-      // Open all accordion panels
-      var panels = document.querySelectorAll('.accordion-panel');
-      var panelStates = [];
-      panels.forEach(function (p) {
-        panelStates.push(p.classList.contains('open'));
-        p.classList.add('open');
+      // Clone the page into an offscreen container
+      var page = document.querySelector('.page');
+      var clone = page.cloneNode(true);
+
+      // Add PDF header
+      var header = document.createElement('div');
+      header.className = 'pdf-header';
+      header.innerHTML =
+        '<div class="pdf-header-title">Capital ROI Estimator — ' + bankName + '</div>' +
+        '<div class="pdf-header-sub">SAS Viya + Risk Solutions · Capital Analytics Platform</div>' +
+        '<div class="pdf-header-meta">' +
+          '<span>OSFI · Basel IV</span>' +
+          '<span>Confidential</span>' +
+          '<span>Generated: ' + new Date().toLocaleDateString('en-CA') + '</span>' +
+        '</div>';
+      clone.insertBefore(header, clone.firstChild);
+
+      // Apply PDF mode
+      clone.classList.add('pdf-mode');
+
+      // Force benchmark panel open in clone
+      var cloneBenchBody = clone.querySelector('.collapsible-body');
+      if (cloneBenchBody) cloneBenchBody.style.maxHeight = 'none';
+      var cloneBenchChevron = clone.querySelector('#benchChevron');
+      if (cloneBenchChevron) cloneBenchChevron.style.transform = 'rotate(180deg)';
+
+      // Mount offscreen
+      var wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;z-index:-1;';
+      wrapper.appendChild(clone);
+      document.body.appendChild(wrapper);
+
+      // Re-render charts inside the clone
+      var cloneCanvases = clone.querySelectorAll('canvas');
+      cloneCanvases.forEach(function (canvas) {
+        var original = document.getElementById(canvas.id);
+        if (!original) return;
+        // Copy the rendered chart as an image
+        var img = document.createElement('img');
+        img.src = original.toDataURL('image/png');
+        img.style.cssText = 'width:100%;height:100%;object-fit:contain;';
+        canvas.parentNode.replaceChild(img, canvas);
       });
 
-      var page = document.querySelector('.page');
-      var inputs = readInputs(refs);
-      var bankName = inputs.bankName || 'Capital ROI';
-      var fileName = bankName.replace(/[^a-zA-Z0-9]/g, '_') + '_ROI_Report.pdf';
-
       var opt = {
-        margin:      [8, 8, 8, 8],
+        margin:      [10, 10, 10, 10],
         filename:    fileName,
-        image:       { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 960 },
+        image:       { type: 'jpeg', quality: 0.92 },
+        html2canvas: { scale: 2, useCORS: true, scrollY: 0, width: 760, windowWidth: 760 },
         jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+        pagebreak:   { mode: ['css', 'legacy'], avoid: ['.card', '.chart-card', '.inaction-panel', '.exec-strip', '.kpi-card', '.section-divider', '.pdf-header'] },
       };
 
-      html2pdf().set(opt).from(page).save().then(function () {
-        // Restore accordion states
-        panels.forEach(function (p, i) {
-          if (!panelStates[i]) p.classList.remove('open');
-        });
-        // Restore benchmarks
-        if (!benchWasOpen) toggleBenchmarks();
-
+      html2pdf().set(opt).from(clone).save().then(function () {
+        document.body.removeChild(wrapper);
         exportBtn.classList.remove('exporting');
         exportBtn.innerHTML =
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>' +
