@@ -903,4 +903,54 @@
 
   initAccordions(document);
   update();
+
+  // ─── PDF EXPORT ──────────────────────────────────────────────────────────
+  var exportBtn = document.getElementById('exportPdfBtn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', function () {
+      if (exportBtn.classList.contains('exporting')) return;
+      exportBtn.classList.add('exporting');
+      exportBtn.textContent = 'Generating…';
+
+      // Expand benchmarks panel so it's captured
+      var benchWasOpen = refs.elements.benchTrigger.getAttribute('aria-expanded') === 'true';
+      if (!benchWasOpen) toggleBenchmarks();
+
+      // Open all accordion panels
+      var panels = document.querySelectorAll('.accordion-panel');
+      var panelStates = [];
+      panels.forEach(function (p) {
+        panelStates.push(p.classList.contains('open'));
+        p.classList.add('open');
+      });
+
+      var page = document.querySelector('.page');
+      var inputs = readInputs(refs);
+      var bankName = inputs.bankName || 'Capital ROI';
+      var fileName = bankName.replace(/[^a-zA-Z0-9]/g, '_') + '_ROI_Report.pdf';
+
+      var opt = {
+        margin:      [8, 8, 8, 8],
+        filename:    fileName,
+        image:       { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 960 },
+        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+      };
+
+      html2pdf().set(opt).from(page).save().then(function () {
+        // Restore accordion states
+        panels.forEach(function (p, i) {
+          if (!panelStates[i]) p.classList.remove('open');
+        });
+        // Restore benchmarks
+        if (!benchWasOpen) toggleBenchmarks();
+
+        exportBtn.classList.remove('exporting');
+        exportBtn.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>' +
+          ' Export PDF';
+      });
+    });
+  }
 })();

@@ -56,6 +56,20 @@ body {
 .pill-osfi { background: rgba(31,96,174,.45); color: #a8c4ea; border: 1px solid rgba(168,196,234,.3); }
 .pill-conf { background: rgba(236,17,26,.18); color: #f4979b; border: 1px solid rgba(244,151,155,.3); }
 
+.btn-export-pdf {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 11px; font-weight: 600; letter-spacing: .03em;
+  padding: 5px 12px; border-radius: 6px;
+  background: rgba(255,255,255,.12); color: #d4ddf0;
+  border: 1px solid rgba(255,255,255,.2);
+  cursor: pointer; transition: all .15s;
+  white-space: nowrap;
+}
+.btn-export-pdf:hover { background: rgba(255,255,255,.22); color: #fff; }
+.btn-export-pdf:active { transform: scale(.97); }
+.btn-export-pdf.exporting { opacity: .6; pointer-events: none; }
+
 /* ─── PAGE ──────────────────────────────────────────── */
 .page {
   max-width: 1180px;
