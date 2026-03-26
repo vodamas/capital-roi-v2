@@ -1,0 +1,9 @@
+{
+  "name": "capital-analytics-roi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js"
+  }
+}
